@@ -40,3 +40,5 @@ endfunction(add_project)
 
 add_subdirectory (InterfaceManager)
 add_subdirectory (InterfaceMonitor)
+add_subdirectory (Tests)
+
