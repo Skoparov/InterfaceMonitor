@@ -6,7 +6,7 @@
 
 InterfaceManagerImpl::InterfaceManagerImpl()
 {
-    //creating a udp socket
+    /**< creating a udp socket */
     mSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (mSock == -1) {
         throw std::runtime_error("Error creating socket");
@@ -52,13 +52,13 @@ InterfacesData InterfaceManagerImpl::getCurrInterfaceList() const
              throw std::runtime_error("Socket not initialized");
         }
 
-        // getting a linked list comprised of ifaddrs structs
+        /**< getting a linked list comprised of ifaddrs structs */
         ifaddrs* interface;
         if (getifaddrs(&interfaceList) == -1){
             throw std::runtime_error("Error getting interfaces info");
         }
 
-        // iterating thorough the list
+        /**< iterating thorough the list */
         interface = interfaceList;
         while(interface != nullptr)
         {
@@ -72,7 +72,7 @@ InterfacesData InterfaceManagerImpl::getCurrInterfaceList() const
         throw;
     }
 
-    // If the operation was successful, clear the linked list
+    /**< If the operation was successful, clear the linked list */
     if(interfaceList != nullptr){
         freeifaddrs(interfaceList);
     }
@@ -82,7 +82,7 @@ InterfacesData InterfaceManagerImpl::getCurrInterfaceList() const
 
 void InterfaceManagerImpl::removeGoneInterfaces(const InterfacesData& interfacesData)
 {
-    // Removing gone interfaces from the map
+    /**< Removing gone interfaces from the map */
     for(auto interface = mInterfaces.begin(); interface != mInterfaces.end();)
     {
         std::string name = interface->second.name;
@@ -95,7 +95,7 @@ void InterfaceManagerImpl::removeGoneInterfaces(const InterfacesData& interfaces
         {
             InterfaceInfo info = interface->second;
             mInterfaces.erase(interface++);            
-            interfaceListUpdateSignal(info, false); //sending a notification to the application
+            interfaceListUpdateSignal(info, false); // A notification to the application
         }
         else{
             ++interface;
@@ -105,7 +105,7 @@ void InterfaceManagerImpl::removeGoneInterfaces(const InterfacesData& interfaces
 
 void InterfaceManagerImpl::updateInterfaces(const InterfacesData& interfaceList)
 {
-    // Updating avilable interfaces info
+    /**< Updating avilable interfaces info */
     for (auto& interface : interfaceList)
     {
         bool isNewInterface = !mInterfaces.count(interface.ifa_name);
@@ -116,14 +116,14 @@ void InterfaceManagerImpl::updateInterfaces(const InterfacesData& interfaceList)
             mInterfaces.insert(InterfaceInfoPair(info.name, info));
         }
 
-        // updating the current interface info
+        /**< updating the current interface info */
         updateInterfaceInfo(interface.ifa_name, isNewInterface);
 
         if(isNewInterface)
         {
             auto infoIter = mInterfaces.find(interface.ifa_name);
 
-            //if not first update, sending a notification to the application
+            /**< if not first update, sending a notification to the application */
             if(!mFirstUpdate){
              interfaceListUpdateSignal(infoIter->second, true);
             }
@@ -163,7 +163,7 @@ void InterfaceManagerImpl::updateInterfaceInfo(std::string interfaceName, const 
 
 bool InterfaceManagerImpl::getInterfaceType(const std::string &interfaceName, InterfaceType &type) const
 {
-    // Executing the interface type query
+    /**< Executing the interface type query */
     std::string str = "cat /sys/class/net/" + interfaceName + "/type";
 
     FILE* pipe = popen(str.c_str(), "r");
@@ -171,7 +171,7 @@ bool InterfaceManagerImpl::getInterfaceType(const std::string &interfaceName, In
         return false;
     }
 
-    // Reading the result from the pipe
+    /**< Reading the result from the pipe */
     std::string result;
     while(!feof(pipe))
     {
@@ -183,7 +183,7 @@ bool InterfaceManagerImpl::getInterfaceType(const std::string &interfaceName, In
 
     pclose(pipe);
 
-    // Converting the gathered type to the lib's platform-independant type
+    /**< Converting the gathered type to the lib's platform-independant type */
     const int iftype = std::stoi(result);
     switch(iftype)
     {
@@ -209,10 +209,10 @@ bool InterfaceManagerImpl::getMacAndStatus(const std::string &interfaceName, con
         return false;
     }
 
-    // Status
+    /**< Status */
     isActive = (ifr.ifr_flags & ( IFF_UP | IFF_RUNNING )) == ( IFF_UP | IFF_RUNNING );
 
-    // If the interface is not a loopback or a tunnel, reading it's mac address
+    /**< If the interface is not a loopback or a tunnel, reading it's mac address */
     int macAddrSize = 6;
     if(!(ifr.ifr_flags & IFF_LOOPBACK && type != IF_TYPE_TUN) &&
        ioctl(mSock, SIOCGIFHWADDR, &ifr) == 0)

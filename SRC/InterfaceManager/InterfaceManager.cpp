@@ -18,10 +18,11 @@ InterfaceManager::InterfaceManager(io_service& io, const uint& updatePeriodMsec)
         return;
     } 
 
-    // Creating a thread to update information about ifaces asynchronously
-    mWork = std::unique_ptr<io_service::work> (new io_service::work(mThreadService));
+    /**< Creating a thread to update information about ifaces asynchronously */
+    mWork = WorkPtr(new io_service::work(mThreadService));
     mThreadGroup.create_thread(boost::bind(&io_service::run, &mThreadService));
 
+    /**< Connecting signals */
     mImpl->statusChangedSignal.connect(boost::bind(&InterfaceManager::onStatusChangedSlot, this, _1, _2));
     mImpl->interfaceListUpdateSignal.connect(boost::bind(&InterfaceManager::onInterfaceUpdateSlot, this, _1, _2));
     mImpl->updateFailedSignal.connect(boost::bind(&InterfaceManager::onUpdateFailedSlot, this));
@@ -41,7 +42,7 @@ void InterfaceManager::stop()
     mUpdateTimer.cancel();
 }
 
-const InterfaceInfoStorage &InterfaceManager::getInterfaceData() const
+InterfaceInfoStorage InterfaceManager::getInterfaceData() const
 {
     return mImpl->getInterfacesData();
 }
@@ -53,7 +54,7 @@ uint InterfaceManager::getUpdateTimeout() const
 
 void InterfaceManager::updateInterfaces()
 {
-    // Calling update fucntion in another thread
+    /**< Calling update function in another thread */
     mThreadService.dispatch(boost::bind(&InterfaceManagerImpl::update, mImpl.get()));
 }
 
@@ -65,7 +66,7 @@ void InterfaceManager::startTimer(uint timeout)
 
 void InterfaceManager::onTimeout(const boost::system::error_code &ec)
 {
-    if(!ec)
+    if(!ec) // if the timer was not canceled
     {
         updateInterfaces();
         startTimer(mUpdatePeriodMsec);

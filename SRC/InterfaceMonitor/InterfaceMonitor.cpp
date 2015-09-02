@@ -77,12 +77,13 @@ void InterfaceMonitor::onInterfaceListUpdate(const InterfaceInfo &info, const bo
 void InterfaceMonitor::onUpdateFailed()
 {
    stop();
+   /**< Handling is incumbent upon a user */
    throw std::runtime_error("Update failed");
 }
 
 void InterfaceMonitor::startTimer(uint timeout)
 {
-    /**< updating the timer */
+    /**< Updating the timer */
     mPrintTimer.expires_from_now(msec(timeout));
     mPrintTimer.async_wait(boost::bind(&InterfaceMonitor::onTimeout, this, boost::asio::placeholders::error));
 }

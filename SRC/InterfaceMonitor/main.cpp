@@ -17,14 +17,13 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGINT, &action, NULL);
 
-    uint updateTimeout = 500;
+    uint interfaceUpdateTimeout = 500;
     uint printTimeout = 5000;
-
-    boost::asio::io_service::work work(eventLoop);
 
     try
     {
-        InterfaceMonitor mon(eventLoop, updateTimeout, printTimeout);
+        InterfaceMonitor mon(eventLoop, interfaceUpdateTimeout, printTimeout);
+        boost::asio::io_service::work work(eventLoop);
         mon.start();
         eventLoop.run();
     }

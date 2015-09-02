@@ -23,11 +23,12 @@
     #error "Unknown platform"
 #endif
 
+using namespace boost::asio;
+
 typedef boost::posix_time::millisec msec;
 typedef std::unique_ptr<InterfaceManagerImpl> ImplPtr;
+typedef std::unique_ptr<io_service::work> WorkPtr;
 typedef unsigned int uint;
-
-using namespace boost::asio;
 
 ////////////////////////////////////////////////////////////
 ///////            InterfaceManager               //////////
@@ -41,20 +42,20 @@ public:
 
     void start();
     void stop();
-    const InterfaceInfoStorage& getInterfaceData() const;
+    InterfaceInfoStorage getInterfaceData() const;
     uint getUpdateTimeout() const;
 
 private:
     void updateInterfaces();
     void startTimer(uint timeout);
 
-    //slots:
+    /**< Slots */
     void onTimeout(const boost::system::error_code &ec);
     void onUpdateFailedSlot();
     void onStatusChangedSlot(const std::string& name, const bool& status);
     void onInterfaceUpdateSlot(const InterfaceInfo& info, const bool& action);
 
-     /**< functions below are used to make signals call slots in the main thread */
+     /**< The functions below are used to force signals call slots in the main thread */
     void sendUpdateFailedSignal();
     void sendStatusChangedSignal(const std::string& name, const bool& status);
     void sendInterfaceUpdateSignal(const InterfaceInfo& info, const bool& action);  
@@ -67,7 +68,7 @@ private:
     io_service& mEventLoop;
     io_service mThreadService;
     boost::thread_group mThreadGroup;          /**< Used to update interface data in async way */
-    std::unique_ptr<io_service::work> mWork;   
+    WorkPtr mWork;
 
     boost::mutex mMutex;
 
