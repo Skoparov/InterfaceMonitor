@@ -28,7 +28,6 @@ using namespace boost::asio;
 typedef boost::posix_time::millisec msec;
 typedef std::unique_ptr<InterfaceManagerImpl> ImplPtr;
 typedef std::unique_ptr<io_service::work> WorkPtr;
-typedef unsigned int uint;
 
 ////////////////////////////////////////////////////////////
 ///////            InterfaceManager               //////////
@@ -37,43 +36,31 @@ typedef unsigned int uint;
 class InterfaceManager
 {
 public:
-    InterfaceManager(io_service& io, const uint& updatePeriodMsec);
+    InterfaceManager(io_service& io);
     virtual ~InterfaceManager();
 
-    void start();
-    void stop();
+    void startListening();
+    void stopListening();
+    void updateDevices();
     InterfaceInfoStorage getInterfaceData() const;
-    uint getUpdateTimeout() const;
 
-private:
-    void updateInterfaces();
-    void startTimer(uint timeout);
-
-    /**< Slots */
-    void onTimeout(const boost::system::error_code &ec);
+private:   
+    /**< Slots */ 
     void onUpdateFailedSlot();
-    void onStatusChangedSlot(const std::string& name, const bool& status);
     void onInterfaceUpdateSlot(const InterfaceInfo& info, const bool& action);
 
      /**< The functions below are used to force signals call slots in the main thread */
-    void sendUpdateFailedSignal();
-    void sendStatusChangedSignal(const std::string& name, const bool& status);
+    void sendUpdateFailedSignal();    
     void sendInterfaceUpdateSignal(const InterfaceInfo& info, const bool& action);  
 
 private:   
-    ImplPtr mImpl;                             /**<  An implementation depends on the platform */
-    uint mUpdatePeriodMsec;                    /**< Interface info update period in msec */
-    deadline_timer mUpdateTimer;               /**< Interface data is updaten upon timeout */
-
+    ImplPtr mImpl;                             /**<  An implementation depends on the platform */   
     io_service& mEventLoop;
-    io_service mThreadService;
-    boost::thread_group mThreadGroup;          /**< Used to update interface data in async way */
+    io_service mImplService;
+    boost::thread_group mThreadGroop;
     WorkPtr mWork;
 
-    boost::mutex mMutex;
-
-public:
-    statusSignal statusChangedSignal;            /**< Emitted if an interface has changed it's status */
+public: 
     updateSignal interfaceUpdateSignal;          /**< Emitted if an interface is added or removed */
     errorSignal  updateFailedSignal;             /**< Emitted on update error */
 };

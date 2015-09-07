@@ -5,26 +5,27 @@ static boost::asio::io_service eventLoop;
 
 void closeHandler (int sigNum)
 {
-   std::cout<<"Finishing the program"<<std::endl;
+   std::cout<<"\nFinishing the program"<<std::endl;
    eventLoop.stop();
 }
 
 int main(int argc, char **argv)
-{
+{     
     /**< Close signals handling */
     struct sigaction action;
     action.sa_handler = closeHandler;
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGINT, &action, NULL);
 
-    uint interfaceUpdateTimeout = 500;
     uint printTimeout = 5000;
 
     try
     {
-        InterfaceMonitor mon(eventLoop, interfaceUpdateTimeout, printTimeout);
         boost::asio::io_service::work work(eventLoop);
+
+        InterfaceMonitor mon(eventLoop, printTimeout);
         mon.start();
+
         eventLoop.run();
     }
     catch(const std::exception& e)
@@ -33,8 +34,7 @@ int main(int argc, char **argv)
         eventLoop.stop();
         return 1;
     }
-    catch (...)
-    {
+    catch (...){
         std::cerr << "Unknown exception caught\n";
     }
 

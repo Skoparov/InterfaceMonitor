@@ -19,12 +19,11 @@ struct InterfaceInfo;
 
 typedef std::map<std::string, InterfaceInfo> InterfaceInfoStorage;
 typedef std::pair<std::string, InterfaceInfo> InterfaceInfoPair;
-typedef boost::signals2::signal<void (const std::string& name, const bool& status)> statusSignal;
 typedef boost::signals2::signal<void (const InterfaceInfo& info, const bool& action)> updateSignal;
 typedef boost::signals2::signal<void ()> errorSignal;
 typedef boost::unique_lock<boost::mutex> unique_lock;
 
-// Platform - independant interface types
+// Platform - independent interface types
 enum InterfaceType
 {
     IF_TYPE_ETH,
@@ -40,7 +39,7 @@ enum InterfaceType
 /**
 * @class AbstractInterfaceManagerImpl
 * @brief An abstract implementation for InterfaceManager.
-* All platform-dependant implementations should inherit this class
+* All platform-dependent implementations should inherit this class
 */
 
 class AbstractInterfaceManagerImpl
@@ -49,16 +48,17 @@ public:
       AbstractInterfaceManagerImpl();
       virtual ~AbstractInterfaceManagerImpl(){};
 
-      virtual bool update() = 0;
+      virtual void startListening() = 0; /**< Begin listening to system notifications */
+      virtual void stopListening() = 0;  /**< Stop listening to system notifications */
+      virtual void updateDevices() = 0;  /**< Directly updates devices data */
+
       const InterfaceInfoStorage& getInterfacesData();
 
 protected:
      InterfaceInfoStorage mInterfaces;         /**< All gathered interface data is stored here */
-     boost::mutex mMutex;
-     bool mFirstUpdate;
+     boost::mutex mMutex; 
 
 public:
-      statusSignal statusChangedSignal;        /**< Emitted if an interface changes it's status */
       updateSignal interfaceListUpdateSignal;  /**< Emitted if an interface is added or removed */
       errorSignal  updateFailedSignal;         /**< Emitted on update error */
 };
@@ -75,12 +75,10 @@ public:
 struct InterfaceInfo
 {
     std::string name;
-    unsigned char L2_addr[6];
+    std::string hwAddr;
     InterfaceType type;
-    bool isActive;
-    bool isVirtual;
 
-    InterfaceInfo(std::string interfaceName);
+    InterfaceInfo();
 };
 
 #endif // ABSTRACTIMTERFACEMANAGERIMPL_H

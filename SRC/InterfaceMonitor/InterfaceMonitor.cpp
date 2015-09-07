@@ -4,24 +4,21 @@
 ///////            InterfaceMonitor               //////////
 ////////////////////////////////////////////////////////////
 
-InterfaceMonitor::InterfaceMonitor(io_service& io, const uint& updatePeriodMsec,
-                                   const uint& printPeriodMsec, std::ostream* stream) :
+InterfaceMonitor::InterfaceMonitor(io_service& io, const uint& printPeriodMsec, std::ostream* stream) :
                    mPrintPeriodMsec(printPeriodMsec),
-                   mPrintTimer(io, msec(updatePeriodMsec)),
+                   mPrintTimer(io, msec(printPeriodMsec)),
                    mOutputStream(stream)
 
 {      
     try{
-       mManager = InterfaceManagerPtr(new InterfaceManager(io, updatePeriodMsec));
+       mManager = InterfaceManagerPtr(new InterfaceManager(io));
     }
     catch(...)
     {
         /**< Handling is incumbent upon a user */
-        throw;
-        return;
+        throw;    
     }  
 
-    mManager->statusChangedSignal.connect(boost::bind(&InterfaceMonitor::onInterfaceStateChanged, this, _1, _2));
     mManager->interfaceUpdateSignal.connect(boost::bind(&InterfaceMonitor::onInterfaceListUpdate, this, _1, _2));
     mManager->updateFailedSignal.connect(boost::bind(&InterfaceMonitor::onUpdateFailed, this));
 }
@@ -30,53 +27,52 @@ void InterfaceMonitor::start()
 {
    unique_lock(mMutex);
 
-   mManager->start();
-   startTimer(mManager->getUpdateTimeout());
+   mManager->updateDevices();
+   mManager->startListening();
+   startTimer();
 }
 
 void InterfaceMonitor::stop()
 {
     unique_lock(mMutex);
 
+    mManager->stopListening();
     mPrintTimer.cancel();
 }
 
 void InterfaceMonitor::printInterfaces() const
 {
     unique_lock(mMutex);
-
     const InterfaceInfoStorage interfaceData = mManager->getInterfaceData();
-    if(interfaceData.size())
+
+    for(auto& interface : interfaceData)
     {
-        for(auto interface : interfaceData)
-        {
-            InterfaceInfo& info = interface.second;
-            (*mOutputStream)<<std::string("IFACE ") + serializeInterfaceInfo(info)<<std::endl;
-        }
+        const InterfaceInfo& info = interface.second;
+        std::string message = (boost::format("%s %s")
+                              % IFACE
+                              % serializeInterfaceInfo(info)).str();
+
+        (*mOutputStream)<<message<<std::endl;
     }
-}
-
-void InterfaceMonitor::onInterfaceStateChanged(const std::string& name, const bool& status) const
-{
-    unique_lock(mMutex);
-
-    std::string message = name + (status? " ON" : " OFF ");
-    (*mOutputStream)<<message<<std::endl;
 }
 
 void InterfaceMonitor::onInterfaceListUpdate(const InterfaceInfo &info, const bool& action) const
 {
     unique_lock(mMutex);
 
-    std::string message = action?
-                "NEW " + serializeInterfaceInfo(info) : "GONE " + info.name;
+    std::string message = (boost::format("%s %s")
+                          % (action? IFACE_ADDED : IFACE_GONE)
+                          % (action? serializeInterfaceInfo(info) : info.name)).str();
 
     (*mOutputStream)<<message<<std::endl;
 }
 
 void InterfaceMonitor::onUpdateFailed()
 {
+   unique_lock(mMutex);
+
    stop();
+
    /**< Handling is incumbent upon a user */
    throw std::runtime_error("Update failed");
 }
@@ -107,23 +103,10 @@ void InterfaceMonitor::setOutputStream(std::ostream* stream)
 
 std::string InterfaceMonitor::serializeInterfaceInfo(const InterfaceInfo &info) const
 {
-    std::string type = typeTostring(info.type);
-
-    std::string macAddr;
-    if(info.type != IF_TYPE_LO && info.type != IF_TYPE_TUN){
-        macAddr = " " + macToString(info.L2_addr);
-    }
-
-    std::string result = (boost::format("%s%s %s") % info.name % macAddr % type).str();
-
-    return result;
-}
-
-std::string InterfaceMonitor::macToString(const unsigned char (&mac)[6]) const
-{
-    return (boost::format("%x:%x:%x:%x:%x:%x")
-            % (int)mac[0] % (int)mac[1] % (int)mac[2]
-            % (int)mac[3] % (int)mac[4] % (int)mac[5]).str();
+   return  (boost::format("%s %s %s")
+            % info.name
+            % info.hwAddr
+            % typeTostring(info.type)).str();
 }
 
 std::string InterfaceMonitor::typeTostring(const InterfaceType& type) const
@@ -132,10 +115,9 @@ std::string InterfaceMonitor::typeTostring(const InterfaceType& type) const
 
     switch(type)
     {
-    case IF_TYPE_ETH:        strType = "Ethernet";break;
-    case IF_TYPE_LO:         strType = "Loopback";break;
-    case IF_TYPE_TUN:        strType = "Tunnel";  break;
-    default:                 strType = "Unknown"; break;
+    case IF_TYPE_ETH:        strType = IFACE_ETH_NAME;      break;
+    case IF_TYPE_TUN:        strType = IFACE_TUN_NAME;      break;
+    default:                 strType = IFACE_UNKNOWN_NAME;  break;
     }
 
     return strType;

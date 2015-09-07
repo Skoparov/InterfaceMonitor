@@ -13,21 +13,24 @@ function (add_project NAME TYPE ALLSOURCES)
         endif()
     endforeach()				             
 
-    if( TYPE STREQUAL "SHARED_LIB")  
-        find_package(Boost 1.55.0 REQUIRED system thread)   
-        add_library(${NAME} SHARED ${ALLSOURCES})					      
-    elseif(TYPE STREQUAL "BIN")		    	
-        find_package(Boost 1.55.0 REQUIRED system thread)   	
-        add_executable(${NAME} ${ALLSOURCES})       
+    if( TYPE STREQUAL "SHARED_LIB")         
+        add_library(${NAME} SHARED ${ALLSOURCES})
+        link_directories (${CMAKE_RUNTIME_OUTPUT_DIRECTORY} ${GLIB2_LINK_DIR})
+        target_link_libraries(${NAME}
+                             ${DBUS_LIBRARY}
+                             ${GLIB2_LIBRARIES})
+
+    elseif(TYPE STREQUAL "BIN")		    	       
+        add_executable(${NAME} ${ALLSOURCES})
         target_link_libraries(${NAME} interfaceManager)
-        link_directories (${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-    elseif( TYPE STREQUAL "TEST")
-        find_package(Boost 1.55.0 REQUIRED system thread chrono unit_test_framework)
+
+    elseif( TYPE STREQUAL "TEST")        
 	add_definitions (-DBOOST_TEST_DYN_LINK)       
         add_executable(${NAME} ${ALLSOURCES})
 	target_link_libraries(${NAME} interfaceManager)
 	link_directories (${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
         set_target_properties(${NAME} PROPERTIES LINKER_LANGUAGE CXX)
+
     else()
         message(FATAL_ERROR "Unknown project type '${TYPE}'")
     endif()

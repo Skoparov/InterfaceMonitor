@@ -4,228 +4,347 @@
 ///////            InterfaceManagerImpl           //////////
 ////////////////////////////////////////////////////////////
 
-InterfaceManagerImpl::InterfaceManagerImpl()
-{
-    /**< creating a udp socket */
-    mSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (mSock == -1) {
-        throw std::runtime_error("Error creating socket");
-    };
-}
-
-bool InterfaceManagerImpl::update()
-{  
-    unique_lock lock(mMutex);
-    bool result = true;
+InterfaceManagerImpl::InterfaceManagerImpl() : mLoop (nullptr), mNetManagerProxy(nullptr)
+{   
+    GError* error = nullptr;  
 
     try
     {
-      const InterfacesData& interfaces = getCurrInterfaceList();
+        mNetManagerProxy = g_dbus_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                                          G_DBUS_PROXY_FLAGS_NONE,
+                                                          NULL,
+                                                          NM_IFACE_NETWORKMANAGER,
+                                                          NM_IFACE_NETWORKMANAGER_PATH,
+                                                          NM_IFACE_NETWORKMANAGER,
+                                                          NULL,
+                                                          &error);
 
-       removeGoneInterfaces(interfaces);
-       updateInterfaces(interfaces);
+        if(mNetManagerProxy == nullptr || error != nullptr){
+            throw std::runtime_error("Error init network manager proxy");
+        }        
+
+        g_signal_connect(G_OBJECT(mNetManagerProxy), NM_SIGNAL_G_SIGNAL, G_CALLBACK(onNetManagerSignal), (gpointer)this);
     }
     catch(const std::exception& e)
-    {       
-        std::cout<<e.what()<<std::endl;        
-        mInterfaces.clear();
-        mFirstUpdate = true;
-        result = false;
-        updateFailedSignal();
-    }  
+    {
+        std::string errorText = e.what();
 
-    if(result && mFirstUpdate){
-        mFirstUpdate = false;
+        if(error != nullptr)
+        {
+            errorText = error->message;
+            g_error_free(error);
+        }
+
+        if(mNetManagerProxy != nullptr){
+            g_object_unref(mNetManagerProxy);
+        }
+
+        throw std::runtime_error(errorText);
     }
-
-    return result;
 }
 
-InterfacesData InterfaceManagerImpl::getCurrInterfaceList() const
+void InterfaceManagerImpl::startListening()
+{           
+    if(mLoop == nullptr){       
+        mLoop = g_main_loop_new (NULL, FALSE);        
+    }
+
+    if(!g_main_is_running(mLoop)){
+        g_main_loop_run (mLoop);
+    }
+}
+
+void InterfaceManagerImpl::stopListening()
 {
-    std::vector<ifaddrs> interfacesData;
-    ifaddrs* interfaceList = nullptr;
+    if(mLoop != nullptr){
+        g_main_loop_quit(mLoop);        
+    }        
+}
+
+void InterfaceManagerImpl::onNetManagerSignal(GDBusProxy *proxy, gchar *sender, gchar *signal, GVariant *params, gpointer data)
+{
+    /**< where data is a pointer to the instance of InterfaceManagerImpl */
+    if(data != nullptr)
+    {
+        InterfaceManagerImpl* impl = (InterfaceManagerImpl*)data;
+        impl->handleNetManagerSignal(signal, params);
+    }
+}
+
+void InterfaceManagerImpl::handleNetManagerSignal(const std::string &signalName, GVariant *params)
+{
+     unique_lock lock(mMutex);
+
+     try
+     {             
+         if(signalName == NM_SIGNAL_DEVICE_ADDED || signalName == NM_SIGNAL_DEVICE_REMOVED )
+         {
+             const char *devPath;
+             g_variant_get_child (params, 0, "&o", &devPath);
+
+             if(signalName == NM_SIGNAL_DEVICE_ADDED)
+             {
+                 InterfaceInfo info = getDeviceInfo(devPath);
+                 mInterfaces.insert(InterfaceInfoPair(devPath, info));
+                 interfaceListUpdateSignal(info, true);
+             }
+             else if(signalName == NM_SIGNAL_DEVICE_REMOVED)
+             {
+
+                 auto info = mInterfaces.find(devPath);
+                 if(info != mInterfaces.end())
+                 {
+                     InterfaceInfo devInfo = info->second;
+                     mInterfaces.erase(devPath);
+                     interfaceListUpdateSignal(devInfo, false);
+                 }
+             }
+         }
+     }
+     catch(const std::exception& e){
+         updateFailedSignal();
+     }
+}
+
+void InterfaceManagerImpl::updateDevices()
+{
+    unique_lock(mMutex);
+
+    GVariant* deviceList = nullptr;
+    GError* error = nullptr;
+    GCancellable* c = nullptr;
 
     try
     {
-        if(mSock == -1 ){
-             throw std::runtime_error("Socket not initialized");
+        if(mNetManagerProxy == nullptr){
+            throw std::runtime_error("Network Manager proxy not initialized");
         }
 
-        /**< getting a linked list comprised of ifaddrs structs */
-        ifaddrs* interface;
-        if (getifaddrs(&interfaceList) == -1){
-            throw std::runtime_error("Error getting interfaces info");
+        deviceList = g_dbus_proxy_call_sync(mNetManagerProxy,
+                                            NM_METHOD_GET_DEVICES,
+                                            NULL,
+                                            G_DBUS_CALL_FLAGS_NONE,
+                                            1000, //timout of operation
+                                            c,
+                                            &error);
+
+
+        if (deviceList == NULL && error != NULL){
+            throw std::runtime_error(error->message);
         }
 
-        /**< iterating thorough the list */
-        interface = interfaceList;
-        while(interface != nullptr)
+        /**< iteration through the list */
+        GVariantIter deviceIter1, deviceIter2;
+        GVariant *deviceNode1, *deviceNode2;
+
+        g_variant_iter_init(&deviceIter1, deviceList);
+        while ((deviceNode1 = g_variant_iter_next_value(&deviceIter1)))
         {
-            interfacesData.push_back(*interface);
-            interface = interface->ifa_next;
+            g_variant_iter_init(&deviceIter2, deviceNode1);
+            while ((deviceNode2 = g_variant_iter_next_value(&deviceIter2)))
+            {
+                gsize strlength = 256;
+                const gchar* devicePath = g_variant_get_string(deviceNode2, &strlength);
+                InterfaceInfo info = getDeviceInfo(devicePath);
+                mInterfaces.insert(InterfaceInfoPair(devicePath, info));
+            }
+        }                
+    }
+    catch(const std::exception& e)
+    {
+        if(deviceList != nullptr){
+            g_variant_unref(deviceList);
         }
+
+        if(error != nullptr){
+            g_error_free(error);
+        }
+
+        if(c != nullptr){
+            g_cancellable_release_fd(c);
+        }
+
+        std::cout<<e.what()<<std::endl;
+        updateFailedSignal();
+    }
+}
+
+InterfaceInfo InterfaceManagerImpl::getDeviceInfo(const std::string& deviceAddr)
+{
+    GDBusProxy* nmDeviceProxy = nullptr;
+    GError* error = nullptr;
+    InterfaceInfo info;
+
+    try
+    {              
+        nmDeviceProxy = g_dbus_proxy_new_for_bus_sync(G_BUS_TYPE_SYSTEM,
+                                                      G_DBUS_PROXY_FLAGS_NONE,
+                                                      NULL,
+                                                      NM_IFACE_NETWORKMANAGER,
+                                                      deviceAddr.c_str(),
+                                                      NM_IFACE_DEVICE,
+                                                      NULL,
+                                                      &error);
+
+
+        if (nmDeviceProxy == NULL && error != NULL){
+            throw std::runtime_error(error->message);
+        }      
+
+        guint deviceType = getDeviceType(nmDeviceProxy);
+
+        info.type = nmDevTypeToLocalDevType(deviceType);
+        info.name = getDeviceName(nmDeviceProxy);
+
+        const std::string nmModule = getNmInterface(deviceType);
+        if(nmModule.length()){
+            info.hwAddr = getDeviceHwAddress(deviceAddr, nmModule);
+        }     
     }
     catch(...)
     {
-        interfacesData.clear();
+        if(nmDeviceProxy != nullptr){
+            g_object_unref(nmDeviceProxy);
+        }
+
+        if(error != nullptr){
+            g_error_free(error);
+        }
+
         throw;
     }
 
-    /**< If the operation was successful, clear the linked list */
-    if(interfaceList != nullptr){
-        freeifaddrs(interfaceList);
-    }
-
-    return interfacesData;
+    return info;
 }
 
-void InterfaceManagerImpl::removeGoneInterfaces(const InterfacesData& interfacesData)
+std::string InterfaceManagerImpl::getDeviceName(GDBusProxy* proxy) const
 {
-    /**< Removing gone interfaces from the map */
-    for(auto interface = mInterfaces.begin(); interface != mInterfaces.end();)
-    {
-        std::string name = interface->second.name;
-        auto ifIter = std::find_if(interfacesData.begin(), interfacesData.end(),
-                                   [&name]( const ifaddrs& item ){
-                                        return name == item.ifa_name;
-                                    });
+    std::string deviceName;
+    gsize strlength = 256;
 
-        if(ifIter == interfacesData.end())
+    GVariant* variant = g_dbus_proxy_get_cached_property(proxy, NM_IFACE_DEVICE_PROPERTY_NAME);
+    if (variant != nullptr)
+    {
+        deviceName = g_variant_get_string(variant, &strlength);
+        g_variant_unref(variant);
+    }
+    else{
+        throw std::runtime_error("Error reading device name");
+    }
+
+    return deviceName;
+}
+
+guint InterfaceManagerImpl::getDeviceType(GDBusProxy* proxy) const
+{
+    guint deviceType = NM_DEVICE_TYPE_UNKNOWN;
+    GVariant* variant = g_dbus_proxy_get_cached_property(proxy, NM_IFACE_DEVICE_PROPERTY_TYPE);
+
+    if (variant != nullptr)
+    {
+        deviceType = g_variant_get_uint32(variant);
+        g_variant_unref(variant);
+    }
+    else{
+        throw std::runtime_error("Error reading device type");
+    }
+
+    return deviceType;
+}
+
+std::string InterfaceManagerImpl::getDeviceHwAddress(const std::string& deviceAddr, const std::string& nmModuleName) const
+{
+    std::string hwAddress;
+
+    GError* error = nullptr;
+    GDBusProxy* ethProxy = nullptr;
+
+    try
+    {
+        ethProxy = g_dbus_proxy_new_for_bus_sync(G_BUS_TYPE_SYSTEM,
+                                                 G_DBUS_PROXY_FLAGS_NONE,
+                                                 NULL,
+                                                 NM_IFACE_NETWORKMANAGER,
+                                                 deviceAddr.c_str(),
+                                                 nmModuleName.c_str(),
+                                                 NULL,
+                                                 &error);
+
+        if (ethProxy == nullptr || error != nullptr){
+            throw std::runtime_error("Failed to init proxy");
+        }
+
+        GVariant* variant = g_dbus_proxy_get_cached_property(ethProxy, NM_IFACE_DEVICE_PROPERTY_HWADDR);
+        if (variant != nullptr)
         {
-            InterfaceInfo info = interface->second;
-            mInterfaces.erase(interface++);            
-            interfaceListUpdateSignal(info, false); // A notification to the application
+            gsize strLength = 255;
+            hwAddress = g_variant_get_string(variant, &strLength);
+            g_variant_unref(variant);
         }
         else{
-            ++interface;
+            throw std::runtime_error("Failed to get hw addr");
         }
     }
-}
-
-void InterfaceManagerImpl::updateInterfaces(const InterfacesData& interfaceList)
-{
-    /**< Updating avilable interfaces info */
-    for (auto& interface : interfaceList)
+    catch(const std::exception& e)
     {
-        bool isNewInterface = !mInterfaces.count(interface.ifa_name);
-        if(isNewInterface)
+        std::string errorText = e.what();
+
+        if(error != nullptr)
         {
-            InterfaceInfo info(interface.ifa_name);
-            info.isVirtual = info.name.find(":");
-            mInterfaces.insert(InterfaceInfoPair(info.name, info));
+            errorText = error->message;
+            g_error_free(error);
         }
 
-        /**< updating the current interface info */
-        updateInterfaceInfo(interface.ifa_name, isNewInterface);
-
-        if(isNewInterface)
-        {
-            auto infoIter = mInterfaces.find(interface.ifa_name);
-
-            /**< if not first update, sending a notification to the application */
-            if(!mFirstUpdate){
-             interfaceListUpdateSignal(infoIter->second, true);
-            }
+        if(ethProxy != nullptr){
+            g_error_free(error);
         }
+
+        throw std::runtime_error(errorText);
     }
+
+    return hwAddress;
 }
 
-void InterfaceManagerImpl::updateInterfaceInfo(std::string interfaceName, const bool& isNewInterface)
+InterfaceType InterfaceManagerImpl::nmDevTypeToLocalDevType(const guint &deviceType) const
 {
-    auto infoIter = mInterfaces.find(interfaceName);
-    InterfaceInfo& info = infoIter->second;
-    bool isActive;
+    InterfaceType type =  IF_TYPE_UNKNOWN;
 
-    if(info.isVirtual)
-    {
-        std::vector<std::string> parts;
-        boost::split(parts,interfaceName,boost::is_any_of(":"));
-        interfaceName = parts.front();
+    if(deviceType == NM_DEVICE_TYPE_WIFI || deviceType == NM_DEVICE_TYPE_ETH){
+        type = IF_TYPE_ETH;
+    }
+    else if(deviceType == NM_DEVICE_TYPE_VLAN){
+        type = IF_TYPE_TUN;
     }
 
-    if(!getInterfaceType(interfaceName, info.type)){
-        throw std::runtime_error("Error getting interface type");
-    }
-
-    if(!getMacAndStatus(interfaceName, info.type, info.L2_addr, isActive)){
-        throw std::runtime_error("Error getting mac address");
-    }
-
-    if(isActive != info.isActive)
-    {
-        info.isActive = isActive;
-        if(!isNewInterface){
-            statusChangedSignal(info.name, isActive);
-        }
-    }
+    return type;
 }
 
-bool InterfaceManagerImpl::getInterfaceType(const std::string &interfaceName, InterfaceType &type) const
+std::string InterfaceManagerImpl::getNmInterface(const guint &deviceType) const
 {
-    /**< Executing the interface type query */
-    std::string str = "cat /sys/class/net/" + interfaceName + "/type";
+    std::string type;
 
-    FILE* pipe = popen(str.c_str(), "r");
-    if (!pipe){
-        return false;
-    }
-
-    /**< Reading the result from the pipe */
-    std::string result;
-    while(!feof(pipe))
+    switch(deviceType)
     {
-        char buffer[4];
-        if(fgets(buffer, 128, pipe) != NULL){
-            result += buffer;
-        }
+        case NM_DEVICE_TYPE_ETH:
+                    type = NM_IFACE_DEVICE_WIRED; break;
+        case NM_DEVICE_TYPE_VLAN:
+                    type = NM_IFACE_DEVICE_VLAN; break;
+        case NM_DEVICE_TYPE_WIFI:
+                    type = NM_IFACE_DEVICE_WIFI; break;   
     }
 
-    pclose(pipe);
-
-    /**< Converting the gathered type to the lib's platform-independant type */
-    const int iftype = std::stoi(result);
-    switch(iftype)
-    {
-        case ARPHRD_ETHER :    type = IF_TYPE_ETH;        break;
-        case ARPHRD_TUNNEL :   type = IF_TYPE_TUN;        break;
-        case ARPHRD_TUNNEL6 :  type = IF_TYPE_TUN;        break;
-        case ARPHRD_SIT :      type = IF_TYPE_TUN;        break;
-        case ARPHRD_IPGRE :    type = IF_TYPE_TUN;        break;
-        case ARPHRD_LOOPBACK : type = IF_TYPE_LO;         break;
-        default :              type = IF_TYPE_UNKNOWN;    break;
-    }
-
-    return true;
-}
-
-bool InterfaceManagerImpl::getMacAndStatus(const std::string &interfaceName, const InterfaceType& type,
-                                           unsigned char (&mac)[6], bool &isActive) const
-{
-    ifreq ifr;
-    strcpy(ifr.ifr_name, interfaceName.c_str());
-
-    if (ioctl(mSock, SIOCGIFFLAGS, &ifr)  != 0){
-        return false;
-    }
-
-    /**< Status */
-    isActive = (ifr.ifr_flags & ( IFF_UP | IFF_RUNNING )) == ( IFF_UP | IFF_RUNNING );
-
-    /**< If the interface is not a loopback or a tunnel, reading it's mac address */
-    int macAddrSize = 6;
-    if(!(ifr.ifr_flags & IFF_LOOPBACK && type != IF_TYPE_TUN) &&
-       ioctl(mSock, SIOCGIFHWADDR, &ifr) == 0)
-    {
-        memcpy(mac, ifr.ifr_hwaddr.sa_data, macAddrSize);
-    }
-
-    return true;
+    return type;
 }
 
 InterfaceManagerImpl::~InterfaceManagerImpl()
-{
-    if(mSock != -1){
-        close(mSock);
-    }
+{   
+     if(mNetManagerProxy != nullptr){
+         g_object_unref (mNetManagerProxy);
+     }
+
+     if(mLoop != nullptr)
+     {
+        stopListening();
+        g_main_loop_unref (mLoop);
+     }
 }

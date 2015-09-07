@@ -4,8 +4,7 @@
 ///////         AbstractInterfaceManagerImpl      //////////
 ////////////////////////////////////////////////////////////
 
-AbstractInterfaceManagerImpl::AbstractInterfaceManagerImpl() :
-                              mFirstUpdate (true)
+AbstractInterfaceManagerImpl::AbstractInterfaceManagerImpl()
 {
 
 }
@@ -20,11 +19,8 @@ const InterfaceInfoStorage& AbstractInterfaceManagerImpl::getInterfacesData()
 ///////             InterfaceInfo                 //////////
 ////////////////////////////////////////////////////////////
 
-InterfaceInfo::InterfaceInfo(std::string interfaceName) :
-    name(interfaceName),
-    type(IF_TYPE_UNKNOWN),
-    isActive(false),
-    isVirtual(false)
+InterfaceInfo::InterfaceInfo() :
+    type(IF_TYPE_UNKNOWN)
 {
 
 }

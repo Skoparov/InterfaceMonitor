@@ -6,20 +6,37 @@
 * @brief Contains a linux-based concrete class of InterfaceManager implementation
 */
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if_arp.h>
-#include <net/if.h>
-#include <ifaddrs.h>
-#include <unistd.h>
 #include <iostream>
-
-#include <boost/algorithm/string.hpp>
+#include "dbus/dbus.h"
+#include <dbus/dbus-glib.h>
+#include <gio/gio.h>
+#include <glib-object.h>
 
 #include "AbstractInterfaceManagerImpl.h"
 
-typedef std::vector<ifaddrs> InterfacesData;
+enum NmDeviceType
+{
+    NM_DEVICE_TYPE_UNKNOWN = 0,    //The device type is unknown.
+    NM_DEVICE_TYPE_ETH = 1,   //The device is wired Ethernet device.
+    NM_DEVICE_TYPE_WIFI = 2,       //The device is an 802.11 WiFi device.
+    NM_DEVICE_TYPE_VLAN = 11,      //The device is a VLAN interface.
+};
+
+#define NM_IFACE_NETWORKMANAGER             "org.freedesktop.NetworkManager"
+#define NM_IFACE_NETWORKMANAGER_PATH        "/org/freedesktop/NetworkManager"
+#define NM_IFACE_DEVICE                     "org.freedesktop.NetworkManager.Device"
+#define NM_IFACE_DEVICE_WIRED               "org.freedesktop.NetworkManager.Device.Wired"
+#define NM_IFACE_DEVICE_VLAN                "org.freedesktop.NetworkManager.Device.Vlan"
+#define NM_IFACE_DEVICE_WIFI                "org.freedesktop.NetworkManager.Device.Wireless"
+#define NM_IFACE_DEVICE_PROPERTY_NAME       "Interface"
+#define NM_IFACE_DEVICE_PROPERTY_TYPE       "DeviceType"
+#define NM_IFACE_DEVICE_PROPERTY_HWADDR     "HwAddress"
+
+#define NM_SIGNAL_G_SIGNAL                  "g-signal"   /**< connecting to g-signal, we connect to all signals coming from a proxy */
+#define NM_SIGNAL_DEVICE_ADDED              "DeviceAdded"
+#define NM_SIGNAL_DEVICE_REMOVED            "DeviceRemoved"
+
+#define NM_METHOD_GET_DEVICES               "GetDevices"
 
 ////////////////////////////////////////////////////////////
 ///////            InterfaceManagerImpl           //////////
@@ -31,21 +48,26 @@ public:
     InterfaceManagerImpl();
     ~InterfaceManagerImpl();
 
-    bool update();   /**< Removes gone, adds new and updates ifaces, sends corresponding signals */
+    void startListening();
+    void stopListening();
+    void updateDevices();
 
-private:
-    InterfacesData getCurrInterfaceList() const; /**< Returns a vector of ifaddrs for all avilable interfaces */
+private:       
 
-    void updateInterfaces(const InterfacesData& interfaceList);
-    void removeGoneInterfaces(const InterfacesData& interfaceList);
+    static void onNetManagerSignal(GDBusProxy *proxy, gchar *sender, gchar* signal, GVariant* params, gpointer data);
+    void handleNetManagerSignal(const std::string& signalName, GVariant* params);
 
-    void updateInterfaceInfo(std::string interfaceName, const bool& isNewInterface = false);
-    bool getInterfaceType(const std::string& interfaceName, InterfaceType& type) const;
-    bool getMacAndStatus(const std::string& interfaceName, const InterfaceType& type,
-                         unsigned char (&mac)[6], bool& isActive) const;
+    InterfaceInfo getDeviceInfo(const std::string& deviceAddr);
+    guint getDeviceType(GDBusProxy* proxy) const;
+    std::string getDeviceName(GDBusProxy* proxy) const;
+    std::string getDeviceHwAddress(const std::string& deviceAddr, const std::string& nmModuleName) const;
 
-private:   
-    int mSock;       /**< Used to gather L2 information and the status of an interface */
+    InterfaceType nmDevTypeToLocalDevType(const guint& deviceType) const;
+    std::string getNmInterface(const guint& deviceType) const;  /**< The name of an interface responsible for the device type */
+
+private:     
+    GMainLoop *mLoop;    /**< GLib's event loop is required to get their signal system working */
+    GDBusProxy* mNetManagerProxy;  
 };
 
 #endif // INTERFACEMANAGERIMPLLINUX_H
