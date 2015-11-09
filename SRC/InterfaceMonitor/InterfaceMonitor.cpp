@@ -10,15 +10,7 @@ InterfaceMonitor::InterfaceMonitor(io_service& io, const uint& printPeriodMsec, 
                    mOutputStream(stream)
 
 {      
-    try{
-       mManager = InterfaceManagerPtr(new InterfaceManager(io));
-    }
-    catch(...)
-    {
-        /**< Handling is incumbent upon a user */
-        throw;    
-    }  
-
+    mManager = InterfaceManagerPtr(new InterfaceManager(io));
     mManager->interfaceUpdateSignal.connect(boost::bind(&InterfaceMonitor::onInterfaceListUpdate, this, _1, _2));
     mManager->updateFailedSignal.connect(boost::bind(&InterfaceMonitor::onUpdateFailed, this));
 }
