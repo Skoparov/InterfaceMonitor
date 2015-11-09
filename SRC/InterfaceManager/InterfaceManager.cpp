@@ -8,13 +8,7 @@ InterfaceManager::InterfaceManager(io_service& io) :
     mEventLoop(io),
     mWork(new io_service::work(mImplService))
 {           
-    try{
-       mImpl = ImplPtr(new InterfaceManagerImpl);       
-    }
-    catch(...){       
-        throw;   
-    } 
-
+    mImpl = ImplPtr(new InterfaceManagerImpl);       
     mThreadGroop.create_thread(boost::bind(&io_service::run, &mImplService));
 
     /**< Connecting signals */
