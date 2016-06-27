@@ -2,7 +2,7 @@
 A simple network interface monitor for Linux, based on signals from NetworkManager. 
 Updates interface information in real time.
 
-Requires the following packets: dbus libdbus-1-dev libdbus-glib-1-dev libdbus-glib-1-2
+Requires the following packages: dbus libdbus-1-dev libdbus-glib-1-dev libdbus-glib-1-2
 
 Tests are fully automatic, but require the following start parameters:
 - File with a sample of an interface list actual for the current system 
